@@ -37,7 +37,7 @@ SCANNER_PASSWORD = os.getenv("SCANNER_PASSWORD")
 # Google Sheets integration (optional)
 GOOGLE_SA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 SHEETS_SPREADSHEET_ID = os.getenv("SHEETS_SPREADSHEET_ID")
-SHEETS_TAB_NAME = os.getenv("SHEETS_TAB_NAME", "Form_Responses_1")
+SHEETS_TAB_NAME = os.getenv("SHEETS_TAB_NAME", "Sheet1")
 UPDATE_SHEETS_ON_MARK = os.getenv("UPDATE_SHEETS_ON_MARK", "false").lower() in ("true", "1", "yes")
 
 # CORS origins for the mobile app
@@ -168,7 +168,7 @@ def login(req: LoginRequest):
 def get_all_attendees():
     """Fetches a list of all attendees from the database."""
     # --- FIX: Changed "name" to "Name" to match the database key ---
-    docs = collection.find({}, {"Name": 1, "attendee_id": 1, "attendance_status": 1, "_id": 0})
+    docs = collection.find({}, {"full_name": 1, "attendee_id": 1, "attendance_status": 1, "_id": 0})
     return list(docs)
 
 @app.get("/api/attendee/{attendee_id}")
