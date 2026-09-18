@@ -10,6 +10,7 @@ Config via environment variables.
 """
 import os
 import json
+import certifi
 from dotenv import load_dotenv
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException
@@ -17,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 from pymongo import MongoClient
+
 
 # Load environment variables from a .env file for local development
 load_dotenv()
@@ -54,7 +56,7 @@ if not SCANNER_ID or not SCANNER_PASSWORD:
 
 # --- Database Client Initialization ---
 try:
-    client = MongoClient(MONGO_URI)
+    client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
     db = client[MONGO_DB_NAME]
     collection = db[MONGO_COLLECTION_NAME]
     # Test the connection
