@@ -9,25 +9,25 @@ Endpoints:
  - GET  /api/stats
  - GET  /api/stats/by-branch
 
-MongoDB fields used:
+MongoDB fields:
  - Name
  - College Email ID
  - Ticket Status
  - Email Status
  - Attendee ID
  - Attendance
+
+Config via environment variables.
 """
 
 import os
 import json
-import certifi
 
 from dotenv import load_dotenv
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import datetime
 from pymongo import MongoClient
 
 
@@ -51,18 +51,27 @@ SCANNER_PASSWORD = os.getenv("SCANNER_PASSWORD")
 
 GOOGLE_SA_JSON = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
 SHEETS_SPREADSHEET_ID = os.getenv("SHEETS_SPREADSHEET_ID")
-SHEETS_TAB_NAME = os.getenv("SHEETS_TAB_NAME", "Sheet1")
+SHEETS_TAB_NAME = os.getenv(
+    "SHEETS_TAB_NAME",
+    "Form_Responses_1"
+)
 
 UPDATE_SHEETS_ON_MARK = (
-    os.getenv("UPDATE_SHEETS_ON_MARK", "false").lower()
+    os.getenv(
+        "UPDATE_SHEETS_ON_MARK",
+        "false"
+    ).lower()
     in ("true", "1", "yes")
 )
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
+CORS_ORIGINS = os.getenv(
+    "CORS_ORIGINS",
+    "*"
+).split(",")
 
 
 # ============================================================
-# REQUIRED CONFIGURATION CHECKS
+# CRITICAL CONFIGURATION CHECKS
 # ============================================================
 
 if not MONGO_URI:
@@ -82,26 +91,22 @@ if not MONGO_COLLECTION_NAME:
 
 if not SCANNER_ID or not SCANNER_PASSWORD:
     raise RuntimeError(
-        "FATAL: SCANNER_ID and SCANNER_PASSWORD environment variables must be set."
+        "FATAL: SCANNER_ID and SCANNER_PASSWORD "
+        "environment variables must be set."
     )
 
 
 # ============================================================
-# MONGODB
+# MONGODB CONNECTION
 # ============================================================
 
 try:
     client = MongoClient(
-        MONGO_URI,
-        tls=True,
-        tlsCAFile=certifi.where(),
-        serverSelectionTimeoutMS=10000,
-        connectTimeoutMS=10000,
-        socketTimeoutMS=10000,
-        retryWrites=True,
+        MONGO_URI
     )
 
     db = client[MONGO_DB_NAME]
+
     collection = db[MONGO_COLLECTION_NAME]
 
     client.admin.command("ping")
@@ -112,26 +117,33 @@ try:
 
 except Exception as e:
     raise RuntimeError(
-        f"❌ Could not initialize MongoDB client: {e}"
+        f"❌ Could not connect to MongoDB: {e}"
     )
 
 
 # ============================================================
-# GOOGLE SHEETS
+# GOOGLE SHEETS SERVICE
 # ============================================================
 
 def build_sheets_service():
-    """Build and return Google Sheets service if configured."""
+    """
+    Builds and returns a Google Sheets service client
+    if Google Sheets integration is configured.
+    """
 
     if not GOOGLE_SA_JSON:
-        print("ℹ️ Google Sheets integration is disabled.")
+        print(
+            "ℹ️ Google Sheets integration is disabled."
+        )
         return None
 
     try:
         from google.oauth2.service_account import Credentials
         from googleapiclient.discovery import build
 
-        cred_dict = json.loads(GOOGLE_SA_JSON)
+        cred_dict = json.loads(
+            GOOGLE_SA_JSON
+        )
 
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets"
@@ -148,13 +160,16 @@ def build_sheets_service():
             credentials=creds
         )
 
-        print("✅ Google Sheets service initialized.")
+        print(
+            "✅ Google Sheets service initialized."
+        )
 
         return service
 
     except Exception as e:
         print(
-            f"⚠️ Warning: Could not initialize Google Sheets service: {e}"
+            "⚠️ Warning: Could not initialize "
+            f"Google Sheets service: {e}"
         )
         return None
 
@@ -163,7 +178,7 @@ sheets_service = build_sheets_service()
 
 
 # ============================================================
-# FASTAPI
+# FASTAPI APPLICATION
 # ============================================================
 
 app = FastAPI(
@@ -175,7 +190,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=[
+        "GET",
+        "POST",
+        "OPTIONS"
+    ],
     allow_headers=["*"],
 )
 
@@ -201,16 +220,17 @@ class MarkRequest(BaseModel):
 
 def attendee_doc_to_dict(doc):
     """
-    Converts a MongoDB document into a JSON-serializable dictionary.
+    Converts a MongoDB document into a JSON-serializable
+    dictionary.
     """
 
     if not doc:
         return None
 
     out = {
-        k: v
-        for k, v in doc.items()
-        if k != "_id"
+        key: value
+        for key, value in doc.items()
+        if key != "_id"
     }
 
     out["id"] = str(
@@ -219,6 +239,37 @@ def attendee_doc_to_dict(doc):
     )
 
     return out
+
+
+def column_number_to_letter(column_number: int) -> str:
+    """
+    Converts a zero-based column number to a Google Sheets
+    column letter.
+
+    Examples:
+        0  -> A
+        1  -> B
+        25 -> Z
+        26 -> AA
+        27 -> AB
+    """
+
+    result = ""
+
+    while column_number >= 0:
+        result = (
+            chr(
+                column_number % 26
+                + ord("A")
+            )
+            + result
+        )
+
+        column_number = (
+            column_number // 26
+        ) - 1
+
+    return result
 
 
 def update_google_sheet_mark(
@@ -230,42 +281,82 @@ def update_google_sheet_mark(
     for the matching Attendee ID.
     """
 
-    if not sheets_service or not SHEETS_SPREADSHEET_ID:
+    if (
+        not sheets_service
+        or not SHEETS_SPREADSHEET_ID
+    ):
+        print(
+            "⚠️ Google Sheets service is not configured."
+        )
         return False
 
     try:
-        range_all = f"{SHEETS_TAB_NAME}!A:Z"
+
+        # ----------------------------------------------------
+        # READ SHEET
+        # ----------------------------------------------------
+
+        range_all = (
+            f"{SHEETS_TAB_NAME}!A:Z"
+        )
 
         result = (
             sheets_service
             .spreadsheets()
             .values()
             .get(
-                spreadsheetId=SHEETS_SPREADSHEET_ID,
+                spreadsheetId=(
+                    SHEETS_SPREADSHEET_ID
+                ),
                 range=range_all
             )
             .execute()
         )
 
-        rows = result.get("values", [])
+        rows = result.get(
+            "values",
+            []
+        )
 
         if not rows:
-            print("⚠️ Google Sheet contains no rows.")
+            print(
+                "⚠️ Google Sheet contains no rows."
+            )
             return False
 
+        # ----------------------------------------------------
+        # HEADER
+        # ----------------------------------------------------
+
         header = rows[0]
+
         data_rows = rows[1:]
 
         if "Attendee ID" not in header:
-            print("❌ 'Attendee ID' column not found in Google Sheet.")
+            print(
+                "❌ 'Attendee ID' column not found "
+                "in Google Sheet."
+            )
             return False
 
         if "Attendance" not in header:
-            print("❌ 'Attendance' column not found in Google Sheet.")
+            print(
+                "❌ 'Attendance' column not found "
+                "in Google Sheet."
+            )
             return False
 
-        id_col_index = header.index("Attendee ID")
-        attendance_col_index = header.index("Attendance")
+        id_col_index = header.index(
+            "Attendee ID"
+        )
+
+        attendance_col_index = header.index(
+            "Attendance"
+        )
+
+        # ----------------------------------------------------
+        # FIND ATTENDEE ROW
+        # ----------------------------------------------------
 
         row_index = -1
 
@@ -273,29 +364,33 @@ def update_google_sheet_mark(
 
             if (
                 len(row) > id_col_index
-                and str(row[id_col_index]).strip() == attendee_id.strip()
+                and str(
+                    row[id_col_index]
+                ).strip()
+                == str(
+                    attendee_id
+                ).strip()
             ):
                 row_index = idx + 2
                 break
 
         if row_index == -1:
+
             print(
-                f"⚠️ Attendee ID not found in Google Sheet: {attendee_id}"
+                "⚠️ Attendee ID not found "
+                f"in Google Sheet: {attendee_id}"
             )
+
             return False
 
-        # Supports columns beyond Z as well.
-        def column_letter(index):
-            result = ""
+        # ----------------------------------------------------
+        # DETERMINE ATTENDANCE COLUMN
+        # ----------------------------------------------------
 
-            while index >= 0:
-                result = chr(index % 26 + ord("A")) + result
-                index = index // 26 - 1
-
-            return result
-
-        attendance_col_letter = column_letter(
-            attendance_col_index
+        attendance_col_letter = (
+            column_number_to_letter(
+                attendance_col_index
+            )
         )
 
         range_to_write = (
@@ -304,46 +399,60 @@ def update_google_sheet_mark(
             f"{row_index}"
         )
 
+        # ----------------------------------------------------
+        # UPDATE ATTENDANCE
+        # ----------------------------------------------------
+
         (
             sheets_service
             .spreadsheets()
             .values()
             .update(
-                spreadsheetId=SHEETS_SPREADSHEET_ID,
+                spreadsheetId=(
+                    SHEETS_SPREADSHEET_ID
+                ),
                 range=range_to_write,
                 valueInputOption="RAW",
                 body={
-                    "values": [[mark_value]]
+                    "values": [
+                        [mark_value]
+                    ]
                 }
             )
             .execute()
         )
 
         print(
-            f"✅ Google Sheet attendance updated: "
-            f"{attendee_id} → {mark_value}"
+            "✅ Google Sheet attendance updated:"
+            f" {attendee_id} → {mark_value}"
         )
 
         return True
 
     except Exception as e:
+
         print(
-            f"❌ An exception occurred during sheet update: {e}"
+            "❌ An exception occurred during "
+            f"Google Sheet update: {e}"
         )
+
         return False
 
 
 # ============================================================
-# LOGIN
+# LOGIN ENDPOINT
 # ============================================================
 
 @app.post("/api/login")
 def login(req: LoginRequest):
-    """Validates scanner credentials."""
+    """
+    Validates scanner credentials.
+    """
 
     if (
         req.scanner_id == SCANNER_ID
-        and req.scanner_password == SCANNER_PASSWORD
+        and
+        req.scanner_password == SCANNER_PASSWORD
     ):
         return {
             "ok": True,
@@ -363,7 +472,7 @@ def login(req: LoginRequest):
 @app.get("/api/attendees")
 def get_all_attendees():
     """
-    Fetches all attendees from MongoDB.
+    Fetches a list of all attendees from MongoDB.
     """
 
     docs = collection.find(
@@ -383,10 +492,15 @@ def get_all_attendees():
 # GET SINGLE ATTENDEE
 # ============================================================
 
-@app.get("/api/attendee/{attendee_id}")
-def get_attendee(attendee_id: str):
+@app.get(
+    "/api/attendee/{attendee_id}"
+)
+def get_attendee(
+    attendee_id: str
+):
     """
-    Fetches a single attendee using Attendee ID.
+    Fetches full details for a single attendee
+    using the Attendee ID field.
     """
 
     projection = {
@@ -404,6 +518,7 @@ def get_attendee(attendee_id: str):
     )
 
     if not doc:
+
         raise HTTPException(
             status_code=404,
             detail="Attendee not found"
@@ -416,7 +531,9 @@ def get_attendee(attendee_id: str):
 # MARK ATTENDANCE
 # ============================================================
 
-@app.post("/api/attendee/{attendee_id}/mark")
+@app.post(
+    "/api/attendee/{attendee_id}/mark"
+)
 def mark_attendance(
     attendee_id: str,
     req: MarkRequest
@@ -425,11 +542,12 @@ def mark_attendance(
     Marks an attendee as present.
 
     Flow:
-    1. Validate scanner credentials
-    2. Find attendee using Attendee ID
-    3. Check whether already attended
-    4. Optionally update Google Sheets
-    5. Update MongoDB Attendance field
+
+    1. Validate scanner credentials.
+    2. Find attendee using Attendee ID.
+    3. Check whether the ticket was already used.
+    4. Optionally update Google Sheets.
+    5. Update MongoDB Attendance field.
     """
 
     # --------------------------------------------------------
@@ -438,8 +556,10 @@ def mark_attendance(
 
     if (
         req.scanner_id != SCANNER_ID
-        or req.scanner_password != SCANNER_PASSWORD
+        or
+        req.scanner_password != SCANNER_PASSWORD
     ):
+
         raise HTTPException(
             status_code=401,
             detail="Invalid scanner credentials"
@@ -456,13 +576,14 @@ def mark_attendance(
     )
 
     if not doc:
+
         raise HTTPException(
             status_code=404,
             detail="Attendee not found"
         )
 
     # --------------------------------------------------------
-    # CHECK ALREADY ATTENDED
+    # CHECK WHETHER ALREADY ATTENDED
     # --------------------------------------------------------
 
     if doc.get("Attendance") == "Attended":
@@ -473,15 +594,18 @@ def mark_attendance(
         )
 
     # --------------------------------------------------------
-    # GOOGLE SHEETS
+    # GOOGLE SHEETS UPDATE
     # --------------------------------------------------------
 
     sheet_updated = False
 
     if UPDATE_SHEETS_ON_MARK:
 
-        sheet_updated = update_google_sheet_mark(
-            attendee_id
+        sheet_updated = (
+            update_google_sheet_mark(
+                attendee_id,
+                "Attended"
+            )
         )
 
         if not sheet_updated:
@@ -512,27 +636,36 @@ def mark_attendance(
         }
     )
 
+    # --------------------------------------------------------
+    # VERIFY MONGODB UPDATE
+    # --------------------------------------------------------
+
     if result.matched_count == 0:
 
         raise HTTPException(
             status_code=404,
-            detail="Attendee not found while updating attendance."
+            detail=(
+                "Attendee not found while "
+                "updating attendance."
+            )
         )
 
     print(
-        f"✅ Attendance marked in MongoDB: "
-        f"{attendee_id} → Attended"
+        "✅ MongoDB attendance updated:"
+        f" {attendee_id} → Attended"
     )
 
     return {
         "ok": True,
-        "message": "Attendance marked successfully.",
+        "message": (
+            "Attendance marked successfully."
+        ),
         "sheet_updated": sheet_updated
     }
 
 
 # ============================================================
-# ATTENDANCE STATS
+# ATTENDANCE STATISTICS
 # ============================================================
 
 @app.get("/api/stats")
@@ -543,16 +676,21 @@ def get_attendance_stats():
 
     try:
 
-        total_attendees = collection.count_documents({})
+        total_attendees = (
+            collection.count_documents({})
+        )
 
-        attended_count = collection.count_documents(
-            {
-                "Attendance": "Attended"
-            }
+        attended_count = (
+            collection.count_documents(
+                {
+                    "Attendance": "Attended"
+                }
+            )
         )
 
         absent_count = (
-            total_attendees - attended_count
+            total_attendees
+            - attended_count
         )
 
         return {
@@ -566,13 +704,14 @@ def get_attendance_stats():
         raise HTTPException(
             status_code=500,
             detail=(
-                f"An error occurred while fetching stats: {e}"
+                "An error occurred while "
+                f"fetching stats: {e}"
             )
         )
 
 
 # ============================================================
-# BRANCH-WISE ATTENDANCE STATS
+# BRANCH-WISE ATTENDANCE STATISTICS
 # ============================================================
 
 @app.get("/api/stats/by-branch")
@@ -585,6 +724,10 @@ def get_branch_stats():
 
         pipeline = [
 
+            # ------------------------------------------------
+            # GROUP BY BRANCH
+            # ------------------------------------------------
+
             {
                 "$group": {
 
@@ -595,9 +738,7 @@ def get_branch_stats():
                     },
 
                     "total_attended": {
-
                         "$sum": {
-
                             "$cond": [
                                 {
                                     "$eq": [
@@ -608,22 +749,27 @@ def get_branch_stats():
                                 1,
                                 0
                             ]
-
                         }
-
                     }
-
                 }
             },
+
+            # ------------------------------------------------
+            # FORMAT RESULT
+            # ------------------------------------------------
 
             {
                 "$project": {
 
                     "branch": "$_id",
 
-                    "total_members": "$total_members",
+                    "total_members": (
+                        "$total_members"
+                    ),
 
-                    "total_attended": "$total_attended",
+                    "total_attended": (
+                        "$total_attended"
+                    ),
 
                     "total_absent": {
                         "$subtract": [
@@ -636,21 +782,31 @@ def get_branch_stats():
                 }
             },
 
+            # ------------------------------------------------
+            # SORT BY BRANCH
+            # ------------------------------------------------
+
             {
                 "$sort": {
                     "branch": 1
                 }
             }
-
         ]
 
         stats = list(
-            collection.aggregate(pipeline)
+            collection.aggregate(
+                pipeline
+            )
         )
+
+        # ----------------------------------------------------
+        # HANDLE EMPTY BRANCH VALUES
+        # ----------------------------------------------------
 
         for stat in stats:
 
-            if not stat["branch"]:
+            if not stat.get("branch"):
+
                 stat["branch"] = "Unknown"
 
         return stats
@@ -660,6 +816,7 @@ def get_branch_stats():
         raise HTTPException(
             status_code=500,
             detail=(
-                f"An error occurred while fetching branch stats: {e}"
+                "An error occurred while "
+                f"fetching branch stats: {e}"
             )
         )
