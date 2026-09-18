@@ -56,14 +56,12 @@ if not SCANNER_ID or not SCANNER_PASSWORD:
 
 # --- Database Client Initialization ---
 try:
-    client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
+    client = MongoClient( MONGO_URI, tls=True, tlsCAFile=certifi.where(), serverSelectionTimeoutMS=10000, connectTimeoutMS=10000, socketTimeoutMS=10000, retryWrites=True, )
     db = client[MONGO_DB_NAME]
     collection = db[MONGO_COLLECTION_NAME]
-    # Test the connection
-    client.admin.command('ping')
-    print("✅ MongoDB connection successful.")
+    print("✅ MongoDB client initialized.")
 except Exception as e:
-    raise RuntimeError(f"❌ Could not connect to MongoDB: {e}")
+    raise RuntimeError( f"❌ Could not initialize MongoDB client: {e}" )
 
 
 # --- Optional Google Sheets Service ---
